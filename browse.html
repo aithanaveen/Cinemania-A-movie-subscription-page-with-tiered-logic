@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Browse – CineMania</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<nav class="navbar" id="navbar"></nav>
+<div class="search-overlay" id="searchOverlay">
+  <div class="search-box"><div class="search-input-wrap"><span class="search-icon">🔍</span><input type="text" class="search-input" id="searchInput" placeholder="Search movies, shows..." oninput="handleSearch(event)" autocomplete="off"><button class="search-close-btn" onclick="closeSearch()">✕</button></div></div>
+  <div class="search-results" id="searchResults"></div>
+</div>
+
+<div class="page-hero">
+  <h1>BROWSE <span style="color:var(--accent-red)">CONTENT</span></h1>
+  <p>Explore thousands of movies, series and documentaries</p>
+</div>
+
+<div class="section" style="padding-top:0">
+  <!-- Filters -->
+  <div style="display:flex;gap:1rem;margin-bottom:2rem;flex-wrap:wrap;align-items:center">
+    <input type="text" class="form-control" id="searchFilter" placeholder="🔍 Search titles..." style="max-width:280px" oninput="applyFilters()">
+    <select class="form-control" id="typeFilter" style="max-width:160px" onchange="applyFilters()">
+      <option value="">All Types</option>
+      <option value="movie">Movies</option>
+      <option value="series">Series</option>
+      <option value="documentary">Documentaries</option>
+    </select>
+    <select class="form-control" id="sortFilter" style="max-width:160px" onchange="applyFilters()">
+      <option value="default">Default</option>
+      <option value="rating">Top Rated</option>
+      <option value="year">Newest First</option>
+    </select>
+  </div>
+  <div class="genre-filter" id="genreFilter"></div>
+  <div class="content-grid" id="browseGrid">
+    <div class="loader" style="grid-column:1/-1"><div class="spinner"></div></div>
+  </div>
+</div>
+
+<!-- CONTENT DETAIL MODAL -->
+<div class="modal-overlay" id="contentModal">
+  <div class="modal" style="max-width:600px" id="contentModalInner"></div>
+</div>
+
+<div class="modal-overlay" id="loginModal"><div class="modal"><button class="modal-close" onclick="closeModal('loginModal')">✕</button><div class="modal-title">WELCOME BACK</div><div class="modal-subtitle">Sign in to continue watching</div><div id="loginAlert"></div><form onsubmit="handleLogin(event)"><div class="form-group"><label class="form-label">Email</label><input type="email" class="form-control" id="loginEmail" placeholder="you@example.com" required></div><div class="form-group"><label class="form-label">Password</label><input type="password" class="form-control" id="loginPassword" placeholder="••••••••" required></div><button type="submit" class="btn btn-primary btn-lg form-submit">Log In</button></form><div class="form-footer">No account? <a onclick="closeModal('loginModal');openModal('registerModal')">Sign Up</a></div></div></div>
+<div class="modal-overlay" id="registerModal"><div class="modal"><button class="modal-close" onclick="closeModal('registerModal')">✕</button><div class="modal-title">JOIN CINEMANIA</div><div class="modal-subtitle">Create your free account</div><div id="registerAlert"></div><form onsubmit="handleRegister(event)"><div class="form-group"><label class="form-label">Name</label><input type="text" class="form-control" id="regName" placeholder="John Doe" required></div><div class="form-group"><label class="form-label">Email</label><input type="email" class="form-control" id="regEmail" required></div><div class="form-group"><label class="form-label">Password</label><input type="password" class="form-control" id="regPassword" required minlength="6"></div><button type="submit" class="btn btn-primary btn-lg form-submit">Create Account</button></form><div class="form-footer">Have account? <a onclick="closeModal('registerModal');openModal('loginModal')">Log In</a></div></div></div>
+
+<script src="/js/app.js"></script>
+<script>
+let allContent = [];
+let activeGenre = 'all';
+
+const GENRES = ['All', 'Action', 'Crime', 'Sci-Fi', 'Drama', 'Comedy', 'Horror', 'Thriller', 'Romance', 'Documentary', 'History'];
+
+async function loadBrowse() {
+  try {
+    const params = new URLSearchParams(location.search);
+    const typeParam = params.get('type') || '';
+    const filterParam = params.get('filter') || '';
+    const idParam = params.get('id');
+
+    if (typeParam) document.getElementById('typeFilter').value = typeParam;
+
+    let url = '/content';
+    if (filterParam === 'trending') url += '?trending=true';
+    else if (filterParam === 'new') url += '?newContent=true';
+
+    allContent = await apiFetch(url);
+
+    // Render genre chips
+    document.getElementById('genreFilter').innerHTML = GENRES.map(g =>
+      `<div class="genre-chip ${g.toLowerCase() === 'all' ? 'active' : ''}" onclick="setGenre('${g.toLowerCase()}')">${g}</div>`
+    ).join('');
+
+    renderGrid(allContent);
+
+    if (idParam) {
+      const item = allContent.find(c => c.id == idParam);
+      if (item) openContentModal(item);
+    }
+  } catch(err) { console.error(err); }
+}
+
+function setGenre(g) {
+  activeGenre = g;
+  document.querySelectorAll('.genre-chip').forEach(c => c.classList.toggle('active', c.textContent.toLowerCase() === g));
+  applyFilters();
+}
+
+function applyFilters() {
+  let filtered = [...allContent];
+  const search = document.getElementById('searchFilter')?.value.toLowerCase();
+  const type = document.getElementById('typeFilter')?.value;
+  const sort = document.getElementById('sortFilter')?.value;
+  if (search) filtered = filtered.filter(c => c.title.toLowerCase().includes(search) || (c.description||'').toLowerCase().includes(search));
+  if (type) filtered = filtered.filter(c => c.type === type);
+  if (activeGenre && activeGenre !== 'all') filtered = filtered.filter(c => (c.genre||'').toLowerCase().includes(activeGenre));
+  if (sort === 'rating') filtered.sort((a,b) => b.rating - a.rating);
+  else if (sort === 'year') filtered.sort((a,b) => (b.release_year||0) - (a.release_year||0));
+  renderGrid(filtered);
+}
+
+function renderGrid(items) {
+  const grid = document.getElementById('browseGrid');
+  if (!items.length) { grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1"><div class="empty-icon">🎬</div><div class="empty-title">No content found</div><div class="empty-text">Try changing your filters</div></div>'; return; }
+  grid.innerHTML = items.map(c => renderContentCard(c, false)).join('');
+}
+
+function viewContent(id) {
+  const item = allContent.find(c => c.id == id);
+  if (item) openContentModal(item);
+}
+
+function openContentModal(item) {
+  const emoji = getContentEmoji(item.genre);
+  const hasAccess = item.has_access !== false;
+  document.getElementById('contentModalInner').innerHTML = `
+    <button class="modal-close" onclick="closeModal('contentModal')">✕</button>
+    <div style="text-align:center;font-size:5rem;margin-bottom:1.5rem;background:var(--bg-secondary);border-radius:var(--radius);padding:2rem">${emoji}</div>
+    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:1rem">
+      <span class="badge badge-${item.required_plan}">${item.required_plan?.toUpperCase()}</span>
+      <span class="badge badge-active">${item.type}</span>
+      ${item.is_new ? '<span class="badge" style="background:rgba(0,180,216,0.2);color:#67e8f9">NEW</span>' : ''}
+    </div>
+    <h2 style="font-family:\'Bebas Neue\',sans-serif;font-size:2rem;letter-spacing:2px;margin-bottom:0.5rem">${item.title}</h2>
+    <div style="display:flex;gap:1.5rem;margin-bottom:1rem;font-size:0.85rem;color:var(--text-secondary)">
+      <span>⭐ ${item.rating}</span><span>📅 ${item.release_year||'N/A'}</span><span>⏱️ ${item.duration_mins||'?'} min</span><span>🌐 ${item.language||'English'}</span>
+    </div>
+    <p style="color:var(--text-secondary);line-height:1.7;margin-bottom:1.5rem">${item.description||'No description available.'}</p>
+    <div style="color:var(--text-muted);font-size:0.82rem;margin-bottom:1.5rem">🎭 ${item.genre||'General'}</div>
+    <div style="display:flex;gap:1rem">
+      ${hasAccess
+        ? `<button class="btn btn-primary btn-lg" onclick="watchContent(event,${item.id})">▶ Watch Now</button>`
+        : `<button class="btn btn-gold btn-lg" onclick="window.location='/plans.html'">🔒 Upgrade to ${item.required_plan}</button>`}
+      ${Auth.isLoggedIn() ? `<button class="btn btn-outline" onclick="addWatchlist(event,${item.id})">+ Watchlist</button>` : ''}
+    </div>`;
+  openModal('contentModal');
+}
+
+loadBrowse();
+</script>
+</body>
+</html>
